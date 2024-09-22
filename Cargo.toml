@@ -1,0 +1,8 @@
+[package]
+name = "trace-decoder"
+version = "0.1.0"
+authors = ["iansseijelly"]
+
+[dependencies]
+elf = "0.7"
+clap = { version = "4.5.18", features = ["derive"] }
