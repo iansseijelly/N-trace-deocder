@@ -4,5 +4,6 @@ version = "0.1.0"
 authors = ["iansseijelly"]
 
 [dependencies]
-elf = "0.7"
+object = "0.36"
+capstone = "0.12"
 clap = { version = "4.5.18", features = ["derive"] }
