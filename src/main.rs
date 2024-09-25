@@ -2,11 +2,16 @@ extern crate clap;
 extern crate object;
 extern crate capstone;
 
+mod packet;
+mod tcode;
+
 use std::fs::File;
-use std::io::Read;
+use std::io::{Read, BufReader};
+use std::collections::HashMap;
 use clap::Parser;
 use capstone::prelude::*;
 use capstone::arch::riscv::{ArchMode, ArchExtraMode};
+use capstone::Insn;
 use object::{Object, ObjectSection};
 
 
@@ -21,12 +26,14 @@ struct Args {
     verbose: bool,
 }
 
-fn parse_elf(file_name: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let mut file = File::open(file_name)?;
-    let mut buffer = Vec::new();
-    file.read_to_end(&mut buffer)?;
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let args = Args::parse();
 
-    let elf = object::File::parse(&*buffer)?;
+    let mut elf_file = File::open(args.elf)?;
+    let mut elf_buffer = Vec::new();
+    elf_file.read_to_end(&mut elf_buffer)?;
+
+    let elf = object::File::parse(&*elf_buffer)?;
     
     // assert this is for 64 bit RISC-V
     assert!(elf.architecture() == object::Architecture::Riscv64);
@@ -43,19 +50,19 @@ fn parse_elf(file_name: &str) -> Result<(), Box<dyn std::error::Error>> {
         .detail(true)
         .build()?;
 
-    let decoded_instructions = cs.disasm_all(&text_data, entry_point).unwrap();
+    let decoded_instructions = cs.disasm_all(&text_data, entry_point)?;
     println!("found {} instructions", decoded_instructions.len());
 
+    // create a map of address to instruction 
+    let mut insn_map : HashMap<u64, &Insn> = HashMap::new();
+    for insn in decoded_instructions.as_ref() {
+        insn_map.insert(insn.address(), insn);
+    }
+
+    let trace_file = File::open(args.trace)?;
+    let mut trace_reader : BufReader<File> = BufReader::new(trace_file);
+
+    packet::read_packet(&mut trace_reader)?;
+
     Ok(())
-}
-
-fn main() {
-    let args = Args::parse();
-
-    let mut file = File::open(args.elf.clone()).expect("Failed to open ELF file");
-    let mut buffer = Vec::new();
-    file.read_to_end(&mut buffer).expect("Failed to read ELF file");
-
-    parse_elf(&args.elf).expect("Failed to parse ELF file");
-
 }
