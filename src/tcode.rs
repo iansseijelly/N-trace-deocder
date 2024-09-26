@@ -1,5 +1,6 @@
 #[derive(Debug)]
 pub enum Tcode {
+    TcodeNull,
     TcodeOwn,
     TcodeDbr,
     TcodeIbr,

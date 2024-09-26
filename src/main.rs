@@ -62,7 +62,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let trace_file = File::open(args.trace)?;
     let mut trace_reader : BufReader<File> = BufReader::new(trace_file);
 
-    packet::read_packet(&mut trace_reader)?;
-
+    let packet = packet::read_packet(&mut trace_reader)?;
+    println!("decoded packet: {:?}", packet);
+    while let Ok(packet) = packet::read_packet(&mut trace_reader) {
+        println!("decoded packet: {:?}", packet);
+    }
     Ok(())
 }
