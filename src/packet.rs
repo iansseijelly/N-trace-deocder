@@ -1,7 +1,7 @@
 use std::fs::File;
 use std::io::{Read, BufReader};
 use crate::tcode::Tcode;
-
+use crate::bcode::Btype;
 const MDO_OFFSET: usize = 2;
 const MDO_MASK: usize = 0xFC;
 
@@ -11,13 +11,6 @@ const MESO_EOF:   usize = 0b01;
 const MESO_RES:   usize = 0b10;
 const MESO_LAST:  usize = 0b11;
 
-#[derive(Debug)]
-enum Btype{
-    Bindirect = 0,  // indirect branch
-    Btrap = 1,      // trap
-    Bexception = 2, // exception
-    Binterrupt = 3  // interrupt
-}
 
 #[derive(Debug)]
 enum Sync {
@@ -26,7 +19,7 @@ enum Sync {
 
 #[derive(Debug)]
 pub struct Packet {
-    tcode: Tcode,
+    pub tcode: Tcode,
     src: u16,
     sync: u8,
     b_type: Btype,
@@ -77,10 +70,6 @@ fn read_till_eof(stream: &mut BufReader<File>) -> Result<Vec<u8>, Box<dyn std::e
     Ok(result)
 }
 
-fn refund_addr(addr: u64) -> u64 {
-    addr << 1
-}
-
 pub fn read_packet(stream: &mut BufReader<File>) -> Result<Packet, Box<dyn std::error::Error>> {
     let mut packet = Packet::new();
     let next_byte = read_u8(stream)?;
@@ -96,7 +85,7 @@ pub fn read_packet(stream: &mut BufReader<File>) -> Result<Packet, Box<dyn std::
                 let data_byte = (data[i] as u64 & MDO_MASK as u64) >> MDO_OFFSET << 2; 
                 f_addr = f_addr | (data_byte << ((i-1) * 6));
             }
-            f_addr = refund_addr(f_addr);
+            // f_addr = refund_addr(f_addr);
             packet.tcode = tcode;
             packet.sync = sync;
             packet.f_addr = f_addr;
@@ -113,19 +102,22 @@ pub fn read_packet(stream: &mut BufReader<File>) -> Result<Packet, Box<dyn std::
         }
         Tcode::TcodeIbr => {
             let data = read_till_eof(stream)?;
-            let mut icnt : u16 = 0;
-            for i in 0..data.len() {
-                let data_byte = (data[i] as u16 & MDO_MASK as u16) >> MDO_OFFSET; 
-                icnt = icnt | (data_byte << (i * 6));
+            let b_type = (data[0] & 0xC) >> MDO_OFFSET;
+            // grab the top 4 bits from data[0] and everything else from all other data into one u64
+            let mut icnt : u16 = (data[0] as u16 & 0xF0) >> 4;
+            for i in 1..data.len() {
+                let data_byte = (data[i] as u16 & MDO_MASK as u16) >> MDO_OFFSET << 4;
+                icnt = icnt | (data_byte << ((i-1) * 6));
             }
             let data = read_till_last(stream)?;
             let mut u_addr : u64 = 0;
             for i in 0..data.len() {
-                let data_byte = (data[i] as u64 & MDO_MASK as u64) >> MDO_OFFSET << 2; 
+                let data_byte = (data[i] as u64 & MDO_MASK as u64) >> MDO_OFFSET; 
                 u_addr = u_addr | (data_byte << (i * 6));
+                println!("u_addr: 0x{:x}", u_addr);
             }
-            u_addr = refund_addr(u_addr);
             packet.tcode = tcode;
+            packet.b_type = Btype::from(b_type);
             packet.icnt = icnt;
             packet.u_addr = u_addr;
         }
