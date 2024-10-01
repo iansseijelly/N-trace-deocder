@@ -101,6 +101,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     curr_icnt -= insn.len() as u16 >> 1;
                 }
                 pc = refund_addr(packet.u_addr ^ prev_addr);
+                prev_addr = packet.u_addr ^ prev_addr;
             }
             _ => {
                 println!("unhandled tcode: {:?}", packet);
