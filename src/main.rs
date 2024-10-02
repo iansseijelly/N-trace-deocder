@@ -6,7 +6,7 @@ mod packet;
 mod tcode;
 mod bcode;
 use std::fs::File;
-use std::io::{Read, BufReader, BufWriter};
+use std::io::{Read, Write, BufReader, BufWriter};
 use std::collections::HashMap;
 use clap::Parser;
 use capstone::prelude::*;
@@ -31,6 +31,25 @@ struct Args {
 
 fn refund_addr(addr: u64) -> u64 {
     addr << 1
+}
+
+// FIXME: hacky way to get the offset operand, always the last one
+fn compute_offset(insn: &Insn) -> i64 {
+    let offset = insn.op_str().unwrap().split(",").last().unwrap();
+    let offset_value: i64;
+    if offset.starts_with(" -0x") {
+        offset_value = i64::from_str_radix(&offset[4..], 16).unwrap() * -1;
+    } else if offset.starts_with(" 0x") {
+        offset_value = i64::from_str_radix(&offset[3..], 16).unwrap();
+    } else if offset.starts_with(" -") {
+        offset_value = i64::from_str_radix(&offset[2..], 10).unwrap() * -1;
+    } else if offset.starts_with(" ") {
+        offset_value = i64::from_str_radix(&offset[1..], 10).unwrap();
+    } else {
+        panic!("unknown offset format: {}", offset);
+    }
+    println!("offset_value: {}", offset_value);
+    offset_value
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -75,28 +94,39 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let packet = packet::read_packet(&mut trace_reader)?;
     println!("packet: {:?}", packet);
     let mut pc = refund_addr(packet.f_addr);
+    let mut pc_prev = pc;
     let mut prev_addr = packet.f_addr;
     // main replay loop
     while let Ok(packet) = packet::read_packet(&mut trace_reader) {
         match packet.tcode {   
             Tcode::TcodeDbr => {
+                println!("TcodeDbr: {:?}", packet);
                 let mut curr_icnt = packet.icnt;
                 while curr_icnt > 0 {
                     let insn = insn_map.get(&pc).unwrap();
-                    println!("0x{:x}: {}", pc, insn.mnemonic().unwrap());
+                    println!("{}", insn);
+                    dump_writer.write_all(format!("{}", insn).as_bytes())?;
+                    dump_writer.write_all(b"\n")?;
+                    pc_prev = pc;
                     pc = pc + insn.len() as u64;
                     curr_icnt -= insn.len() as u16 >> 1;
+                    println!("icnt: 0x{:x}", curr_icnt);
                 }
-                println!("pc: 0x{:x}", pc);
-                println!("curr_icnt: {}", curr_icnt);
+                // this must be a branch, so just add the imm
+                let branch_insn = insn_map.get(&pc_prev).unwrap();
+                println!("branch_insn: {}", branch_insn);
+                // Calculate the jump target
+                let offset_value = compute_offset(branch_insn);
+                pc = (pc_prev as i64 + offset_value) as u64;
             }
             Tcode::TcodeIbr => {
                 println!("TcodeIbr: {:?}", packet);
                 let mut curr_icnt = packet.icnt;
                 while curr_icnt > 0 {
-                    println!("curr_icnt: {}", curr_icnt);
                     let insn = insn_map.get(&pc).unwrap();
-                    println!("0x{:x}: {}", pc, insn.mnemonic().unwrap());
+                    println!("{}", insn);
+                    dump_writer.write_all(format!("{}", insn).as_bytes())?;
+                    dump_writer.write_all(b"\n")?;
                     pc = pc + insn.len() as u64;
                     curr_icnt -= insn.len() as u16 >> 1;
                 }
