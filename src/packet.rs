@@ -83,7 +83,7 @@ pub fn read_packet(stream: &mut BufReader<File>) -> Result<Packet, Box<dyn std::
     let tcode: Tcode = Tcode::from(next_byte >> MDO_OFFSET);
     match tcode {
         Tcode::TcodeProgTraceSync => {
-            let data = read_till_last(stream)?;
+            let data = read_till_eof(stream)?;
             let sync = (data[0] & 0x3C) >> MDO_OFFSET;
             assert!(sync == Sync::ProgTraceSync as u8);
             // grab the top 2 bits from data[0] and everything else from all other data into one u64
@@ -92,20 +92,34 @@ pub fn read_packet(stream: &mut BufReader<File>) -> Result<Packet, Box<dyn std::
                 let data_byte = (data[i] as u64 & MDO_MASK as u64) >> MDO_OFFSET << 2; 
                 f_addr = f_addr | (data_byte << ((i-1) * 6));
             }
+            let data = read_till_last(stream)?;
+            let mut timestamp : u64 = 0;
+            for i in 0..data.len() {
+                let data_byte = (data[i] as u64 & MDO_MASK as u64) >> MDO_OFFSET; 
+                timestamp = timestamp | (data_byte << (i * 6));
+            }
             // f_addr = refund_addr(f_addr);
             packet.tcode = tcode;
             packet.sync = sync;
             packet.f_addr = f_addr;
+            packet.tstamp = timestamp;
         }
         Tcode::TcodeDbr => {
-            let data = read_till_last(stream)?;
+            let data = read_till_eof(stream)?;
             let mut icnt : u16 = 0;
             for i in 0..data.len() {
                 let data_byte = (data[i] as u16 & MDO_MASK as u16) >> MDO_OFFSET; 
                 icnt = icnt | (data_byte << (i * 6));
             }
+            let data = read_till_last(stream)?;
+            let mut timestamp : u64 = 0;
+            for i in 0..data.len() {
+                let data_byte = (data[i] as u64 & MDO_MASK as u64) >> MDO_OFFSET; 
+                timestamp = timestamp | (data_byte << (i * 6));
+            }
             packet.tcode = tcode;
             packet.icnt = icnt;
+            packet.tstamp = timestamp;
         }
         Tcode::TcodeIbr => {
             let data = read_till_eof(stream)?;
@@ -116,20 +130,27 @@ pub fn read_packet(stream: &mut BufReader<File>) -> Result<Packet, Box<dyn std::
                 let data_byte = (data[i] as u16 & MDO_MASK as u16) >> MDO_OFFSET << 4;
                 icnt = icnt | (data_byte << ((i-1) * 6));
             }
-            let data = read_till_last(stream)?;
+            let data = read_till_eof(stream)?;
             let mut u_addr : u64 = 0;
             for i in 0..data.len() {
                 let data_byte = (data[i] as u64 & MDO_MASK as u64) >> MDO_OFFSET; 
                 u_addr = u_addr | (data_byte << (i * 6));
                 println!("u_addr: 0x{:x}", u_addr);
             }
+            let data = read_till_last(stream)?;
+            let mut timestamp : u64 = 0;
+            for i in 0..data.len() {
+                let data_byte = (data[i] as u64 & MDO_MASK as u64) >> MDO_OFFSET; 
+                timestamp = timestamp | (data_byte << (i * 6));
+            }
             packet.tcode = tcode;
             packet.b_type = Btype::from(b_type);
             packet.icnt = icnt;
             packet.u_addr = u_addr;
+            packet.tstamp = timestamp;
         }
         Tcode::TcodeProgTraceCorr => {
-            let data = read_till_last(stream)?;
+            let data = read_till_eof(stream)?;
             let evcode = (data[0] & 0x3C) >> MDO_OFFSET;
             println!("evcode: {:?}", evcode);
             // assert!(evcode == Evcode::Disabled as u8);
@@ -139,8 +160,15 @@ pub fn read_packet(stream: &mut BufReader<File>) -> Result<Packet, Box<dyn std::
                 let data_byte = (data[i] as u16 & MDO_MASK as u16) >> MDO_OFFSET << 2; 
                 icnt = icnt | (data_byte << ((i-1) * 6));
             }
+            let data = read_till_last(stream)?;
+            let mut timestamp : u64 = 0;
+            for i in 0..data.len() {
+                let data_byte = (data[i] as u64 & MDO_MASK as u64) >> MDO_OFFSET; 
+                timestamp = timestamp | (data_byte << (i * 6));
+            }
             packet.tcode = tcode;
             packet.icnt = icnt;
+            packet.tstamp = timestamp;
         }
         _ => {
             println!("unknown tcode: {:?}", tcode);
