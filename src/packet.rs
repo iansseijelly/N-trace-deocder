@@ -18,6 +18,11 @@ enum Sync {
 }
 
 #[derive(Debug)]
+enum Evcode {
+    Disabled = 4,
+}
+
+#[derive(Debug)]
 pub struct Packet {
     pub tcode: Tcode,
     src: u16,
@@ -26,7 +31,8 @@ pub struct Packet {
     pub icnt: u16,
     pub f_addr: u64,
     pub u_addr: u64,
-    pub tstamp: u64
+    pub tstamp: u64,
+    pub evcode: u16
 }
 
 impl Packet {
@@ -39,7 +45,8 @@ impl Packet {
             icnt: 0,
             f_addr: 0,
             u_addr: 0,
-            tstamp: 0
+            tstamp: 0,
+            evcode: 0
         }
     }
 }
@@ -120,6 +127,20 @@ pub fn read_packet(stream: &mut BufReader<File>) -> Result<Packet, Box<dyn std::
             packet.b_type = Btype::from(b_type);
             packet.icnt = icnt;
             packet.u_addr = u_addr;
+        }
+        Tcode::TcodeProgTraceCorr => {
+            let data = read_till_last(stream)?;
+            let evcode = (data[0] & 0x3C) >> MDO_OFFSET;
+            println!("evcode: {:?}", evcode);
+            // assert!(evcode == Evcode::Disabled as u8);
+            // grab the top 2 bits from data[0] and everything else from all other data into one u64
+            let mut icnt : u16 = (data[0] as u16 & 0xC0) >> 6;
+            for i in 1..data.len() {
+                let data_byte = (data[i] as u16 & MDO_MASK as u16) >> MDO_OFFSET << 2; 
+                icnt = icnt | (data_byte << ((i-1) * 6));
+            }
+            packet.tcode = tcode;
+            packet.icnt = icnt;
         }
         _ => {
             println!("unknown tcode: {:?}", tcode);

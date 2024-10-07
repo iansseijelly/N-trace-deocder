@@ -37,19 +37,32 @@ fn refund_addr(addr: u64) -> u64 {
 fn compute_offset(insn: &Insn) -> i64 {
     let offset = insn.op_str().unwrap().split(",").last().unwrap();
     let offset_value: i64;
-    if offset.starts_with(" -0x") {
-        offset_value = i64::from_str_radix(&offset[4..], 16).unwrap() * -1;
-    } else if offset.starts_with(" 0x") {
-        offset_value = i64::from_str_radix(&offset[3..], 16).unwrap();
-    } else if offset.starts_with(" -") {
-        offset_value = i64::from_str_radix(&offset[2..], 10).unwrap() * -1;
-    } else if offset.starts_with(" ") {
-        offset_value = i64::from_str_radix(&offset[1..], 10).unwrap();
+    // remove the leading space
+    let offset = offset.trim();
+    if offset.starts_with("-0x") {
+        offset_value = i64::from_str_radix(&offset[3..], 16).unwrap() * -1;
+    } else if offset.starts_with("0x") {
+        offset_value = i64::from_str_radix(&offset[2..], 16).unwrap();
+    } else if offset.starts_with("-") {
+        offset_value = i64::from_str_radix(&offset[1..], 10).unwrap() * -1;
     } else {
-        panic!("unknown offset format: {}", offset);
-    }
+        offset_value = i64::from_str_radix(&offset[0..], 10).unwrap();
+    } 
     println!("offset_value: {}", offset_value);
     offset_value
+}
+
+// step pc by the length of the instruction if it's not a inferable jump
+// if it is a inferable jump, then calculate the jump target
+// if it is branch or uninferable, then panic [TODO]
+fn step_pc(pc: u64, insn: &Insn) -> u64 {
+    let opcode = insn.mnemonic();
+    if matches!(opcode, Some("j" | "jal" | "c.j" | "c.jal")) {
+        let offset = compute_offset(insn);
+        (pc as i64 + offset) as u64
+    } else {
+        pc + insn.len() as u64
+    }
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -96,8 +109,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut pc = refund_addr(packet.f_addr);
     let mut pc_prev = pc;
     let mut prev_addr = packet.f_addr;
+    let mut packet_count = 0;
     // main replay loop
     while let Ok(packet) = packet::read_packet(&mut trace_reader) {
+        packet_count += 1;
         match packet.tcode {   
             Tcode::TcodeDbr => {
                 println!("TcodeDbr: {:?}", packet);
@@ -108,7 +123,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     dump_writer.write_all(format!("{}", insn).as_bytes())?;
                     dump_writer.write_all(b"\n")?;
                     pc_prev = pc;
-                    pc = pc + insn.len() as u64;
+                    pc = step_pc(pc, insn);
                     curr_icnt -= insn.len() as u16 >> 1;
                     println!("icnt: 0x{:x}", curr_icnt);
                 }
@@ -127,18 +142,33 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     println!("{}", insn);
                     dump_writer.write_all(format!("{}", insn).as_bytes())?;
                     dump_writer.write_all(b"\n")?;
-                    pc = pc + insn.len() as u64;
+                    pc = step_pc(pc, insn);
                     curr_icnt -= insn.len() as u16 >> 1;
                 }
                 pc = refund_addr(packet.u_addr ^ prev_addr);
                 prev_addr = packet.u_addr ^ prev_addr;
+            }
+            Tcode::TcodeProgTraceCorr => {
+                println!("TcodeProgTraceCorr: {:?}", packet);
+                let mut curr_icnt = packet.icnt;
+                while curr_icnt > 0 {
+                    let insn = insn_map.get(&pc).unwrap();
+                    println!("{}", insn);
+                    dump_writer.write_all(format!("{}", insn).as_bytes())?;
+                    dump_writer.write_all(b"\n")?;
+                    pc = step_pc(pc, insn);
+                    curr_icnt -= insn.len() as u16 >> 1;
+                }
+                println!("This is the last packet, breaking!");
+                break;
             }
             _ => {
                 println!("unhandled tcode: {:?}", packet);
             }
         }
     }
-    
+
+    println!("No more packets! packet_count: {}", packet_count);
 
     Ok(())
 }
